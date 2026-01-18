@@ -902,33 +902,29 @@ class Drone(nn.Module):
         values = self.value(hidden)
         return logits, values
 
-
 class G2048(nn.Module):
     def __init__(self, env, hidden_size=128):
         super().__init__()
         self.hidden_size = hidden_size
         self.is_continuous = False
 
-        num_obs = np.prod(env.single_observation_space.shape)
+        self.num_dims = int(math.ceil(33**0.25))
+        self.num_obs = 16 * self.num_dims  # 4x4 grid with one-hot encoding of 16 values
 
-        if hidden_size <= 256:
-            self.encoder = torch.nn.Sequential(
-                pufferlib.pytorch.layer_init(nn.Linear(num_obs, 512)),
-                nn.GELU(),
-                pufferlib.pytorch.layer_init(nn.Linear(512, 256)),
-                nn.GELU(),
-                pufferlib.pytorch.layer_init(nn.Linear(256, hidden_size)),
-                nn.GELU(),
-            )
-        else:
-            self.encoder = torch.nn.Sequential(
-                pufferlib.pytorch.layer_init(nn.Linear(num_obs, 2*hidden_size)),
-                nn.GELU(),
-                pufferlib.pytorch.layer_init(nn.Linear(2*hidden_size, hidden_size)),
-                nn.GELU(),
-                pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
-                nn.GELU(),
-            )
+        self.dim = int(math.ceil(33**0.25))
+
+        self.value_embed = torch.nn.Embedding(17, self.dim)
+        self.pos_embed = torch.nn.Embedding(16, self.dim)
+
+        self.encoder = torch.nn.Sequential(
+            torch.nn.Flatten(),
+            pufferlib.pytorch.layer_init(nn.Linear(self.num_obs, 2 * hidden_size)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(2 * hidden_size, hidden_size)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(nn.Linear(hidden_size, hidden_size)),
+            nn.GELU(),
+        )
 
         num_atns = env.single_action_space.n
         self.decoder = torch.nn.Sequential(
@@ -951,11 +947,9 @@ class G2048(nn.Module):
         return self.forward_eval(observations, state)
 
     def encode_observations(self, observations, state=None):
-        batch_size = observations.shape[0]
-        observations = observations.view(batch_size, -1).float()
-
-        # Scale the feat 1 (tile**1.5)
-        observations[:, :16] = observations[:, :16] / 100.0
+        value_obs = self.value_embed(observations.long())
+        pos_obs = self.pos_embed.weight.expand(*value_obs.shape)
+        observations = value_obs + pos_obs
 
         return self.encoder(observations)
 

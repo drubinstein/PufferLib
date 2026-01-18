@@ -12,7 +12,10 @@ class G2048(pufferlib.PufferEnv):
                  use_heuristic_rewards=False, snake_reward_weight=0.0, use_sparse_reward=False,
                  render_mode=None, log_interval=128, buf=None, seed=0):
         self.single_observation_space = gymnasium.spaces.Box(
-            low=0, high=100, shape=(16*18 + 1,), dtype=np.uint8
+            low=0,
+            high=17,
+            shape=(16,),
+            dtype=np.uint8,
         )
         self.single_action_space = gymnasium.spaces.Discrete(4)
         self.render_mode = render_mode

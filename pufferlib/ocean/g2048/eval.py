@@ -66,17 +66,20 @@ def evaluate(env_name, load_model_path):
     Merge score -- Avg: 639395.6, Max: 909969.8
     Reached 32768 prob: 71.22 %
     Reached 65536 prob: 14.75 %
+
+    # embeddings: https://wandb.ai/thatguy11325/pufferlib/runs/g2f00pcm?nw=nwuserthatguy11325
+    Num episodes: 192276
+    Max tile avg: 33166.4
+    Episode length -- Avg: 26950.7, Max: 44906.1
+    Merge score -- Avg: 770645.8, Max: 1040367.2
+    Reached 32768 prob: 85.32 %
+    Reached 65536 prob: 10.15 %
     """
 
 def finetune(env_name, load_model_path):
     args = pufferl.load_config(env_name)
     args['load_model_path'] = load_model_path
-    # args['env']['use_sparse_reward'] = True
     args['env']['scaffolding_ratio'] = 0.85
-
-    # args['policy']['hidden_size'] = 512
-    # args['rnn']['input_size'] = 512
-    # args['rnn']['hidden_size'] = 512
 
     args['train']['total_timesteps'] = 1_000_000_000
     args['train']['learning_rate'] = 0.00005
@@ -90,12 +93,17 @@ def finetune(env_name, load_model_path):
 if __name__ == '__main__':
     import os
     import wandb
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--entity', type=str, default='kywch')
+    parser.add_argument('--run-id', type=str, default='5thsjr61')
+
+    args = parser.parse_args()
 
     # https://wandb.ai/kywch/pufferlib/runs/5thsjr61?nw=nwuserkywch
-    wandb_run_id = '5thsjr61'
-    wandb.init(id=wandb_run_id, project='pufferlib', entity='kywch')
+    wandb.init(id=args.run_id, project='pufferlib', entity=args.entity)
 
-    artifact = wandb.use_artifact(f'{wandb_run_id}:latest')
+    artifact = wandb.use_artifact(f'{args.run_id}:latest')
     data_dir = artifact.download()
     model_file = max(os.listdir(data_dir))
     model_path = f'{data_dir}/{model_file}'
