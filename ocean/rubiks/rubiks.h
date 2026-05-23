@@ -168,12 +168,19 @@ static void rotate_face(Cube *env, int f) {
 void move(Cube *env, int face, int turns) {
     int dir = (turns > 0) ? +1 : -1;
     turns = abs(turns) % 4;
+    // The D face's sticker grid is stored "viewed from above" (same as U), so its
+    // face-rotation must be flipped: CW strip rotation corresponds to CCW sticker
+    // rotation in matrix coords (and vice versa).
+    int face_dir = (face == D) ? -dir : dir;
     for (int t=0; t<turns; t++) {
         if (dir > 0) {
             rotate_strips(env, env->strips[face]);
-            rotate_face(env, face);
         } else {
             rotate_strips_ccw(env, env->strips[face]);
+        }
+        if (face_dir > 0) {
+            rotate_face(env, face);
+        } else {
             rotate_face_ccw(env, face);
         }
     }
