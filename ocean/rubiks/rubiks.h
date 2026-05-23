@@ -29,7 +29,7 @@ typedef struct {
     float* terminals;              // REQUIRED (float on 4.0)
     int num_agents;                // REQUIRED for vecenv
     unsigned int rng;              // per-env seed (vecenv sets env->rng = env index before my_init)
-    int N;                         // == macro N; lets ported logic keep using env->N
+    int cube_n;                    // == macro N; lets ported logic keep using env->cube_n
     int size;                      // 6*N*N
     int shuffles;                  // scramble moves at reset
     int max_episode_steps;
@@ -53,12 +53,12 @@ void add_log(Cube* env) {
     env->log.n++;
 }
 
-#define STICKER(env,f,r,c) ((env)->stickers[(f)*(env)->N*(env)->N + (r)*(env)->N + (c)])
-#define R_TMP(i,j) (env)->r_tmp[(i)*(env)->N + (j)]
+#define STICKER(env,f,r,c) ((env)->stickers[(f)*(env)->cube_n*(env)->cube_n + (r)*(env)->cube_n + (c)])
+#define R_TMP(i,j) (env)->r_tmp[(i)*(env)->cube_n + (j)]
 
 // Precompute strips that surround each face
 void precompute_strips(Cube *env) {
-    int N = env->N;
+    // N is the compile-time macro (#define N 3)
     // For each face looking at it moving clockwise. Strips on other faces that rotate
     // with the face. Order is for clockwise rotation. Describes how to start traversing the strip
     // {Face, starting row, starting col, direction row, direction col}
@@ -102,8 +102,8 @@ void precompute_strips(Cube *env) {
 void reset_stickers(Cube* env) {
     for(int i = 0; i < 6; i++) {
         int col = i;
-            for(int j = 0; j < env->N; j++) {
-               for(int k = 0; k < env->N; k++) {
+            for(int j = 0; j < env->cube_n; j++) {
+               for(int k = 0; k < env->cube_n; k++) {
                    STICKER(env, i,j,k) = col;
                }
             }
@@ -112,7 +112,6 @@ void reset_stickers(Cube* env) {
 
 //Just rotates the strips CLOCKWISE, not the face itself
 static void rotate_strips(Cube *env, strip_t s[4]) {
-    int N = env->N;
     //Copy last strip
     for (int k=0;k<N;k++)
         env->tmp[k] = STICKER(env, s[3].face, s[3].row + s[3].dr*k, s[3].col + s[3].dc*k);
@@ -130,7 +129,6 @@ static void rotate_strips(Cube *env, strip_t s[4]) {
 
 // Rotates the strips COUNTER-CLOCKWISE
 static void rotate_strips_ccw(Cube *env, strip_t s[4]) {
-    int N = env->N;
     //Copy first strip
     for (int k=0;k<N;k++)
         env->tmp[k] = STICKER(env, s[0].face,s[0].row + s[0].dr*k,s[0].col + s[0].dc*k);
@@ -148,7 +146,6 @@ static void rotate_strips_ccw(Cube *env, strip_t s[4]) {
 
 //Just rotates face stickers counter-clockwise
 static void rotate_face_ccw(Cube *env, int f) {
-    int N = env->N;
     for (int i=0;i<N;i++)
         for (int j=0;j<N;j++)
             R_TMP(N-1-j,i) = STICKER(env,f,i,j);
@@ -159,7 +156,6 @@ static void rotate_face_ccw(Cube *env, int f) {
 
 //Just rotates the face stickers CLOCKWISE
 static void rotate_face(Cube *env, int f) {
-    int N = env->N;
     for (int i=0;i<N;i++)
         for (int j=0;j<N;j++)
             R_TMP(j,N-1-i) = STICKER(env,f,i,j);
@@ -195,8 +191,8 @@ float score(Cube *env) {
     for (int f = 0; f < 6; f++) {
         int t_colour = f;
         int face_score = 0;
-        for (int r = 0; r < env->N; r++) {
-            for (int c = 0; c < env->N; c++) {
+        for (int r = 0; r < env->cube_n; r++) {
+            for (int c = 0; c < env->cube_n; c++) {
                 if (STICKER(env, f, r, c) == t_colour)
                     face_score++;
             }
@@ -210,8 +206,8 @@ float score(Cube *env) {
 int is_solved(Cube *env) {
     for (int f = 0; f < 6; f++) {
         int color = f;
-        for (int r = 0; r < env->N; r++) {
-            for (int c = 0; c < env->N; c++) {
+        for (int r = 0; r < env->cube_n; r++) {
+            for (int c = 0; c < env->cube_n; c++) {
                 if (STICKER(env, f, r, c) != color) {
                     return 0;
                 }
@@ -230,11 +226,11 @@ void shuffle(Cube* env, int shuffles) {
 }
 
 void compute_observations(Cube* env) {
-    memcpy(env->observations, env->stickers, 6 * env->N * env->N);
+    memcpy(env->observations, env->stickers, 6 * env->cube_n * env->cube_n);
 }
 
 void init(Cube* env) {
-    env->N = N;
+    env->cube_n = N;
     env->size = 6 * N * N;
     if (env->anim_time == 0) env->anim_time = 0.5f;
     env->render = 0;
@@ -259,8 +255,8 @@ void c_reset(Cube* env) {
 void print_stickers_file(Cube* env, FILE *out) {
     for (int f=0; f<6; f++) {
         fprintf(out, "Face %d:\n", f);
-        for (int r=0; r<env->N; r++) {
-            for (int c=0; c<env->N; c++) {
+        for (int r=0; r<env->cube_n; r++) {
+            for (int c=0; c<env->cube_n; c++) {
                 fprintf(out, "%d ", STICKER(env,f,r,c));
             }
             fprintf(out, "\n");
@@ -279,7 +275,7 @@ void print_strips(Cube *env) {
         printf("Face %s strips:\n", names[f]);
         for (int s=0; s<4; s++) {
             printf("  Strip %d: ", s);
-            for (int k=0; k<env->N; k++) {
+            for (int k=0; k<env->cube_n; k++) {
                 int r = env->strips[f][s].row + env->strips[f][s].dr * k;
                 int c = env->strips[f][s].col + env->strips[f][s].dc * k;
                 printf("(%d,%d,%d) ", env->strips[f][s].face, r, c);
@@ -321,8 +317,8 @@ static inline Vector3 axis_vector(int axis) {
                       (Vector3){0,0,1};
 }
 
-static inline int in_layer(Vector3 pos, int axis, int layer, int N) {
-    float half = (N - 1) / 2.0f;
+static inline int in_layer(Vector3 pos, int axis, int layer, int cube_size) {
+    float half = (cube_size - 1) / 2.0f;
     // spacing must match cubelet spacing in c_render
     float spacing = 1.1f;
     int coord = (axis==0)? (int)roundf(pos.x/spacing + half) :
@@ -397,7 +393,7 @@ void c_render(Cube* env) {
     env->render = 1; //Important global window for anims so need to turn on for this env only
     static int initialized = 0;
     static Camera camera;
-    float half = (env->N - 1) / 2.0f;
+    float half = (env->cube_n - 1) / 2.0f;
     float spacing = 1.1f; //Needs to match 'in layer' code
 
     // Standard across our envs so exiting is always the same
@@ -470,9 +466,9 @@ void c_render(Cube* env) {
 
 
     //CUBE
-    for (int x=0; x<env->N; x++) {
-        for (int y=0; y<env->N; y++) {
-            for (int z=0; z<env->N; z++) {
+    for (int x=0; x<env->cube_n; x++) {
+        for (int y=0; y<env->cube_n; y++) {
+            for (int z=0; z<env->cube_n; z++) {
                 Vector3 pos = (Vector3){
                     (x-half)*spacing,
                     (y-half)*spacing,
@@ -480,26 +476,26 @@ void c_render(Cube* env) {
                 };
                 Color faces[6] = { BLACK, BLACK, BLACK, BLACK, BLACK, BLACK };
                 // Right (+X)
-                if (x == env->N - 1)
-                    faces[0] = sticker_colors[ STICKER(env, R, env->N - 1 - y, env->N - 1 - z) ];
+                if (x == env->cube_n - 1)
+                    faces[0] = sticker_colors[ STICKER(env, R, env->cube_n - 1 - y, env->cube_n - 1 - z) ];
                 // Left (−X)
                 if (x == 0)
-                    faces[1] = sticker_colors[ STICKER(env, L, env->N - 1 - y, z) ];
+                    faces[1] = sticker_colors[ STICKER(env, L, env->cube_n - 1 - y, z) ];
                 // Up (+Y)
-                if (y == env->N - 1)
+                if (y == env->cube_n - 1)
                     faces[2] = sticker_colors[ STICKER(env, U, z, x) ];
                 // Down (−Y)
                 if (y == 0)
-                    faces[3] = sticker_colors[ STICKER(env, D, env->N-1-z, x) ];
+                    faces[3] = sticker_colors[ STICKER(env, D, env->cube_n-1-z, x) ];
                 // Front (+Z)
-                if (z == env->N - 1)
-                    faces[4] = sticker_colors[ STICKER(env, F, env->N - 1 - y, x) ];
+                if (z == env->cube_n - 1)
+                    faces[4] = sticker_colors[ STICKER(env, F, env->cube_n - 1 - y, x) ];
                 // Back (−Z)
                 if (z == 0)
-                    faces[5] = sticker_colors[ STICKER(env, B, env->N - 1 - y, env->N - 1 - x) ];
+                    faces[5] = sticker_colors[ STICKER(env, B, env->cube_n - 1 - y, env->cube_n - 1 - x) ];
                 rlPushMatrix();
                 // rotate only the turning layer while animating
-                if (anim.rotating && in_layer(pos, anim.axis, anim.layer, env->N)) {
+                if (anim.rotating && in_layer(pos, anim.axis, anim.layer, env->cube_n)) {
                     Vector3 axis = axis_vector(anim.axis);
                     rlRotatef(anim.dir * (anim.elapsed / anim.duration) * 90.0f,
                               axis.x, axis.y, axis.z);
@@ -522,14 +518,14 @@ void c_render(Cube* env) {
 
         // toggle between external layers
         if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_LEFT)) {
-            env->highlight_layer = (env->highlight_layer == 0) ? env->N - 1 : 0;
+            env->highlight_layer = (env->highlight_layer == 0) ? env->cube_n - 1 : 0;
 
 
 }        // draw highlight
         float spacing = 1.1f;
-        float half = (env->N-1)/2.0f;
+        float half = (env->cube_n-1)/2.0f;
         float coord = (env->highlight_layer-half)*spacing;
-        float extent = (env->N*spacing)/2.0f + 0.1f;
+        float extent = (env->cube_n*spacing)/2.0f + 0.1f;
         Color highlight = (Color){0,255,255,100}; // translucent yellow
 
 
@@ -621,7 +617,7 @@ void c_step(Cube* env) {
     if (env->render) {
         anim.rotating = 1;
         anim.axis     = FACE_AXIS[face];
-        anim.layer    = FACE_LAYER[face] ? env->N - 1 : 0;
+        anim.layer    = FACE_LAYER[face] ? env->cube_n - 1 : 0;
         anim.dir      = FACE_SIGN[face] * dir;
         anim.elapsed  = 0.0f;
         anim.duration = env->anim_time;
