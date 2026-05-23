@@ -164,13 +164,16 @@ static void rotate_face(Cube *env, int f) {
             STICKER(env,f,i,j) = R_TMP(i,j);
 }
 
-//Execute move for face, rotate face rotate strips in theory supports multiple turns but only 1 tested
+// Execute a face turn: rotate the adjacency strips and the face's own stickers.
+// Supports multiple quarter-turns (turns 1-3); validated against pycuber for all
+// faces, single + multi-turn, via the local cross-check tests.
 void move(Cube *env, int face, int turns) {
     int dir = (turns > 0) ? +1 : -1;
     turns = abs(turns) % 4;
-    // The D face's sticker grid is stored "viewed from above" (same as U), so its
-    // face-rotation must be flipped: CW strip rotation corresponds to CCW sticker
-    // rotation in matrix coords (and vice versa).
+    // D's sticker grid is stored "viewed from above" like U (its near edge is row 0,
+    // mirroring U), but a physical D turn is CW *from below* — the reverse matrix
+    // direction. So D's face-sticker rotation is flipped relative to its strip
+    // rotation; all other faces have matrix-CW aligned with physical-CW.
     int face_dir = (face == D) ? -dir : dir;
     for (int t=0; t<turns; t++) {
         if (dir > 0) {
