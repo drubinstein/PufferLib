@@ -232,7 +232,6 @@ void compute_observations(Cube* env) {
 void init(Cube* env) {
     env->cube_n = N;
     env->size = 6 * N * N;
-    if (env->anim_time == 0) env->anim_time = 0.5f;
     env->render = 0;
     env->user_mode = 0;
     env->highlight_axis = 0;
