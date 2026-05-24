@@ -35,6 +35,32 @@ class DefaultEncoder(nn.Module):
     def forward(self, observations):
         return self.encoder(observations.view(observations.shape[0], -1).float())
 
+class RubiksEmbed(nn.Module):
+    '''Value + positional embedding encoder for the Rubik's cube.
+
+    The observation is 6*N*N integer sticker colours (0..5). Each sticker's colour
+    is embedded and added to a learned per-position embedding, then flattened
+    through an MLP (mirrors the 2048-remix G2048 encoder). PyTorch only: run with
+    `--slowly` — the native CUDA backend has no embedding encoder yet.'''
+    def __init__(self, obs_size, hidden_size=128, embed_dim=32, num_colors=6):
+        super().__init__()
+        self.num_cells = obs_size                 # 6*N*N (e.g. 54 for N=3)
+        self.value_embed = nn.Embedding(num_colors, embed_dim)
+        self.pos_embed = nn.Embedding(self.num_cells, embed_dim)
+        self.register_buffer('positions', torch.arange(self.num_cells), persistent=False)
+        self.encoder = nn.Sequential(
+            nn.Linear(self.num_cells * embed_dim, hidden_size),
+            nn.GELU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.GELU(),
+        )
+
+    def forward(self, observations):
+        B = observations.shape[0]
+        idx = observations.reshape(B, self.num_cells).long()        # (B, cells) colour idx 0..5
+        h = self.value_embed(idx) + self.pos_embed(self.positions)  # (B, cells, embed_dim)
+        return self.encoder(h.reshape(B, -1))                       # (B, hidden_size)
+
 class MinimalEntityEncoder(nn.Module):
     def __init__(self, obs_size, hidden_size=128):
         super().__init__()
