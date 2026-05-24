@@ -12,6 +12,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->num_agents = 1;
     env->shuffles = (int) dict_get(kwargs, "shuffles")->value;
     env->max_episode_steps = (int) dict_get(kwargs, "max_episode_steps")->value;
+    env->depth_exponent = (float) dict_get(kwargs, "depth_exponent")->value;
     env->anim_time = (float) dict_get(kwargs, "anim_time")->value;
     init(env);
 }

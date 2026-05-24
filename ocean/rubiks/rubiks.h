@@ -8,6 +8,7 @@
 #include "rlgl.h"
 
 #define N 3   // Cube is NxNxN. Compile-time (4.0 vecenv requires compile-time OBS_SIZE). Logic is general in N.
+#define STEP_MULT 3   // per-episode max steps = max(5, STEP_MULT * scramble_depth)
 
 typedef struct {
     float perf;            // 0-1: solved or not, per episode
@@ -38,8 +39,9 @@ typedef struct {
     int cube_n;                    // == macro N; lets ported logic keep using env->cube_n
     int size;                      // 6*N*N
     int shuffles;                  // curriculum cap: target max scramble depth (e.g. 35)
-    int curriculum_max;            // per-env adaptive frontier; depth ~ randint(1, curriculum_max)
+    int curriculum_max;            // per-env adaptive frontier; depth ~ P(d) prop d^depth_exponent
     int scramble_depth;            // this episode's scramble depth (for logging)
+    float depth_exponent;          // 0=uniform, 1=linear: bias depth sampling toward the frontier
     int max_episode_steps;
     int tick;
     float score;
@@ -295,9 +297,19 @@ void init(Cube* env) {
 
 void c_reset(Cube* env) {
     reset_stickers(env);
-    // Curriculum: scramble by a random depth in [1, shuffles] quarter-turns each reset
-    // (shuffles=0 leaves the cube solved, as the local tests rely on).
-    env->scramble_depth = (env->curriculum_max > 0) ? (1 + rand_r(&env->rng) % env->curriculum_max) : 0;
+    // Curriculum: sample scramble depth in [1, curriculum_max] with P(d) ~ d^depth_exponent
+    // (0 = uniform, 1 = linear: biases practice toward the frontier). curriculum_max=0 -> solved.
+    if (env->curriculum_max > 0) {
+        float u = (float)rand_r(&env->rng) / ((float)RAND_MAX + 1.0f);   // [0, 1)
+        int d = 1 + (int)(env->curriculum_max * powf(u, 1.0f / (env->depth_exponent + 1.0f)));
+        if (d > env->curriculum_max) d = env->curriculum_max;            // clamp (u near 1)
+        env->scramble_depth = d;
+        // Episode budget scales with difficulty (the inverse solution is `depth` quarter-turns).
+        int cap = STEP_MULT * d;
+        env->max_episode_steps = (cap > 5) ? cap : 5;
+    } else {
+        env->scramble_depth = 0;   // solved start (tests); keep the configured max_episode_steps
+    }
     shuffle(env, env->scramble_depth);  // shuffle(.,0) is a no-op
     env->tick = 0;
     env->score = 0;
