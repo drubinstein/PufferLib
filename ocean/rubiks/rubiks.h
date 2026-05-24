@@ -42,6 +42,10 @@ typedef struct {
     int curriculum_max;            // per-env adaptive frontier; depth ~ P(d) prop d^depth_exponent
     int scramble_depth;            // this episode's scramble depth (for logging)
     float depth_exponent;          // 0=uniform, 1=linear: bias depth sampling toward the frontier
+    int frontier_attempts;         // episodes attempted at depth == curriculum_max (gate window)
+    int frontier_solves;           // solves among those, for the solve-rate gate
+    float advance_threshold;       // raise curriculum_max only when frontier solve-rate >= this
+    int advance_window;            // min frontier attempts before evaluating the gate
     int max_episode_steps;
     int tick;
     float score;
@@ -287,6 +291,8 @@ void init(Cube* env) {
     env->cube_n = N;
     env->size = 6 * N * N;
     env->curriculum_max = (env->shuffles > 0) ? 1 : 0;  // adaptive curriculum starts at depth 1
+    env->frontier_attempts = 0;
+    env->frontier_solves = 0;
     env->render = 0;
     env->user_mode = 0;
     env->highlight_axis = 0;
@@ -708,19 +714,24 @@ void c_step(Cube* env) {
     env->rewards[0] = match_after - match_before;
     env->score = match_after;
 
-    if (is_solved(env)) {
+    int solved = is_solved(env);
+    if (solved || env->tick >= env->max_episode_steps) {
         env->terminals[0] = 1;
-        env->rewards[0] = 1.0f;  // solve = max reward, capped at 1.0 (pufferlib clamps reward to [-1,1])
-        // Adaptive curriculum: solving at the current frontier widens randint by 1 (cap = shuffles).
-        if (env->scramble_depth >= env->curriculum_max && env->curriculum_max < env->shuffles)
-            env->curriculum_max++;
-        env->episode_return += env->rewards[0];
-        add_log(env);
-        c_reset(env);
-        return;
-    }
-    if (env->tick >= env->max_episode_steps) {
-        env->terminals[0] = 1;
+        if (solved) env->rewards[0] = 1.0f;  // solve = max reward, capped at 1.0 (pufferlib clamps to [-1,1])
+        // Solve-rate-gated curriculum: track outcomes at the frontier depth and raise
+        // curriculum_max only once the frontier solve-rate clears advance_threshold over a
+        // window. Keeps the frontier from overshooting actual competence.
+        if (env->scramble_depth == env->curriculum_max) {
+            env->frontier_attempts++;
+            if (solved) env->frontier_solves++;
+            if (env->frontier_attempts >= env->advance_window) {
+                if (env->curriculum_max < env->shuffles &&
+                    (float)env->frontier_solves >= env->advance_threshold * env->frontier_attempts)
+                    env->curriculum_max++;
+                env->frontier_attempts = 0;   // fresh estimate at the (new or same) frontier
+                env->frontier_solves = 0;
+            }
+        }
         env->episode_return += env->rewards[0];
         add_log(env);
         c_reset(env);
