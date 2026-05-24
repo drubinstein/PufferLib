@@ -270,7 +270,11 @@ void init(Cube* env) {
 
 void c_reset(Cube* env) {
     reset_stickers(env);
-    shuffle(env, env->shuffles);
+    // Curriculum: scramble by a random depth in [1, shuffles] quarter-turns each reset
+    // (shuffles=0 leaves the cube solved, as the local tests rely on).
+    if (env->shuffles > 0) {
+        shuffle(env, 1 + rand_r(&env->rng) % env->shuffles);
+    }
     env->tick = 0;
     env->score = 0;
     env->episode_return = 0;
