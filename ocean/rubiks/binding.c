@@ -1,6 +1,10 @@
 #include "rubiks.h"
 
+#if OBS_ONEHOT
+#define OBS_SIZE (6*N*N*6)
+#else
 #define OBS_SIZE (6*N*N)
+#endif
 #define NUM_ATNS 1
 #define ACT_SIZES {12}
 #define OBS_TENSOR_T ByteTensor

@@ -9,6 +9,7 @@
 
 #define N 3   // Cube is NxNxN. Compile-time (4.0 vecenv requires compile-time OBS_SIZE). Logic is general in N.
 #define STEP_MULT 3   // per-episode max steps = max(5, STEP_MULT * scramble_depth)
+#define OBS_ONEHOT 1  // 1: one-hot colours (categorical, runs on native DefaultEncoder); 0: integer indices
 
 typedef struct {
     float perf;            // 0-1: solved or not, per episode
@@ -284,7 +285,17 @@ float matching_fraction(Cube *env) {
 }
 
 void compute_observations(Cube* env) {
-    memcpy(env->observations, env->stickers, 6 * env->cube_n * env->cube_n);
+    int cells = 6 * env->cube_n * env->cube_n;
+#if OBS_ONEHOT
+    // Categorical one-hot per sticker: obs[cell*6 + colour] = 1. Equivalent to a value
+    // embedding once the (existing) Linear encoder runs over it — so it gets the
+    // categorical representation on the native backend with no custom kernel.
+    memset(env->observations, 0, cells * 6);
+    for (int i = 0; i < cells; i++)
+        env->observations[i * 6 + env->stickers[i]] = 1;
+#else
+    memcpy(env->observations, env->stickers, cells);   // integer colour indices (for RubiksEmbed)
+#endif
 }
 
 void init(Cube* env) {
