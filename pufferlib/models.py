@@ -42,9 +42,11 @@ class RubiksEmbed(nn.Module):
     is embedded and added to a learned per-position embedding, then flattened
     through an MLP (mirrors the 2048-remix G2048 encoder). PyTorch only: run with
     `--slowly` — the native CUDA backend has no embedding encoder yet.'''
-    def __init__(self, obs_size, hidden_size=128, embed_dim=32, num_colors=6):
+    def __init__(self, obs_size, hidden_size=128, num_colors=6, embed_dim=None):
         super().__init__()
         self.num_cells = obs_size                 # 6*N*N (e.g. 54 for N=3)
+        if embed_dim is None:                      # remix heuristic: ceil(vocab^0.25); 6 colours -> 2
+            embed_dim = int(np.ceil(num_colors ** 0.25))
         self.value_embed = nn.Embedding(num_colors, embed_dim)
         self.pos_embed = nn.Embedding(self.num_cells, embed_dim)
         self.register_buffer('positions', torch.arange(self.num_cells), persistent=False)
