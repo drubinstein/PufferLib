@@ -47,6 +47,7 @@ typedef struct {
     int frontier_solves;           // solves among those, for the solve-rate gate
     float advance_threshold;       // raise curriculum_max only when frontier solve-rate >= this
     int advance_window;            // min frontier attempts before evaluating the gate
+    float reward_shaping;          // scales per-step match-delta reward: 0=sparse(+solve), 1=dense
     int max_episode_steps;
     int tick;
     float score;
@@ -718,11 +719,11 @@ void c_step(Cube* env) {
         move(env, face, turns);
     }
 
-    // Potential-based (delta) reward: change in % stickers matching their face centre.
-    // Telescopes to (final - initial) match over the episode, so episode length carries
-    // no reward (prevents stalling); reaching solved (match=1.0) is optimal.
+    // Reward = reward_shaping * delta(% stickers matching their centre) per step; +1.0 on solve
+    // (set below). reward_shaping=0 -> sparse (solve bonus only); 1 -> dense potential shaping.
+    // Near-sparse avoids penalising the "destructive" moves required to solve deep cubes.
     float match_after = matching_fraction(env);
-    env->rewards[0] = match_after - match_before;
+    env->rewards[0] = env->reward_shaping * (match_after - match_before);
     env->score = match_after;
 
     int solved = is_solved(env);

@@ -19,6 +19,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->depth_exponent = (float) dict_get(kwargs, "depth_exponent")->value;
     env->advance_threshold = (float) dict_get(kwargs, "advance_threshold")->value;
     env->advance_window = (int) dict_get(kwargs, "advance_window")->value;
+    env->reward_shaping = (float) dict_get(kwargs, "reward_shaping")->value;
     env->anim_time = (float) dict_get(kwargs, "anim_time")->value;
     init(env);
 }
