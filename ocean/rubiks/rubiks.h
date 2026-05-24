@@ -14,6 +14,12 @@ typedef struct {
     float score;           // mean fraction of stickers matching their face centre (1.0=solved)
     float episode_return;  // sum of rewards over episode
     float episode_length;  // steps per episode
+    float shuffle_depth;   // mean scramble depth (quarter-turns) per episode
+    // scramble-depth distribution: fraction of episodes whose depth fell in each bucket
+    float depth_1_7, depth_8_14, depth_15_21, depth_22_28, depth_29_35;
+    // solved episodes per bucket; per-bucket solve rate = solved_X / depth_X
+    float solved_1_7, solved_8_14, solved_15_21, solved_22_28, solved_29_35;
+    float max_shuffles;    // mean per-env adaptive curriculum frontier (current max scramble depth)
     float n;               // REQUIRED last field (aggregation count)
 } Log;
 
@@ -31,7 +37,9 @@ typedef struct {
     unsigned int rng;              // per-env seed (vecenv sets env->rng = env index before my_init)
     int cube_n;                    // == macro N; lets ported logic keep using env->cube_n
     int size;                      // 6*N*N
-    int shuffles;                  // scramble moves at reset
+    int shuffles;                  // curriculum cap: target max scramble depth (e.g. 35)
+    int curriculum_max;            // per-env adaptive frontier; depth ~ randint(1, curriculum_max)
+    int scramble_depth;            // this episode's scramble depth (for logging)
     int max_episode_steps;
     int tick;
     float score;
@@ -48,10 +56,26 @@ typedef struct {
 int is_solved(Cube *env);  // forward decl (defined below); perf tracks solves, not reward sign
 
 void add_log(Cube* env) {
-    env->log.perf += is_solved(env) ? 1 : 0;  // solve rate (dense reward is ~always > 0)
+    int solved = is_solved(env);   // solve rate (dense reward is ~always >0, so don't use reward sign)
+    int d = env->scramble_depth;
+    env->log.perf += solved ? 1 : 0;
     env->log.score += env->score;
     env->log.episode_length += env->tick;
     env->log.episode_return += env->episode_return;
+    env->log.shuffle_depth += d;
+    // scramble-depth distribution (fraction of episodes per bucket after aggregation)
+    env->log.depth_1_7   += (d >= 1  && d <= 7 ) ? 1 : 0;
+    env->log.depth_8_14  += (d >= 8  && d <= 14) ? 1 : 0;
+    env->log.depth_15_21 += (d >= 15 && d <= 21) ? 1 : 0;
+    env->log.depth_22_28 += (d >= 22 && d <= 28) ? 1 : 0;
+    env->log.depth_29_35 += (d >= 29) ? 1 : 0;
+    // solved episodes per bucket (per-bucket solve rate = solved_X / depth_X)
+    env->log.solved_1_7   += (solved && d >= 1  && d <= 7 ) ? 1 : 0;
+    env->log.solved_8_14  += (solved && d >= 8  && d <= 14) ? 1 : 0;
+    env->log.solved_15_21 += (solved && d >= 15 && d <= 21) ? 1 : 0;
+    env->log.solved_22_28 += (solved && d >= 22 && d <= 28) ? 1 : 0;
+    env->log.solved_29_35 += (solved && d >= 29) ? 1 : 0;
+    env->log.max_shuffles += env->curriculum_max;
     env->log.n++;
 }
 
@@ -260,6 +284,7 @@ void compute_observations(Cube* env) {
 void init(Cube* env) {
     env->cube_n = N;
     env->size = 6 * N * N;
+    env->curriculum_max = (env->shuffles > 0) ? 1 : 0;  // adaptive curriculum starts at depth 1
     env->render = 0;
     env->user_mode = 0;
     env->highlight_axis = 0;
@@ -272,9 +297,8 @@ void c_reset(Cube* env) {
     reset_stickers(env);
     // Curriculum: scramble by a random depth in [1, shuffles] quarter-turns each reset
     // (shuffles=0 leaves the cube solved, as the local tests rely on).
-    if (env->shuffles > 0) {
-        shuffle(env, 1 + rand_r(&env->rng) % env->shuffles);
-    }
+    env->scramble_depth = (env->curriculum_max > 0) ? (1 + rand_r(&env->rng) % env->curriculum_max) : 0;
+    shuffle(env, env->scramble_depth);  // shuffle(.,0) is a no-op
     env->tick = 0;
     env->score = 0;
     env->episode_return = 0;
@@ -675,6 +699,9 @@ void c_step(Cube* env) {
     if (is_solved(env)) {
         env->terminals[0] = 1;
         env->rewards[0] = 1.0f;  // solve = max reward, capped at 1.0 (pufferlib clamps reward to [-1,1])
+        // Adaptive curriculum: solving at the current frontier widens randint by 1 (cap = shuffles).
+        if (env->scramble_depth >= env->curriculum_max && env->curriculum_max < env->shuffles)
+            env->curriculum_max++;
         env->episode_return += env->rewards[0];
         add_log(env);
         c_reset(env);
