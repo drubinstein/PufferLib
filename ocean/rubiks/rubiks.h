@@ -8,7 +8,6 @@
 #include "rlgl.h"
 
 #define N 3   // Cube is NxNxN. Compile-time (4.0 vecenv requires compile-time OBS_SIZE). Logic is general in N.
-#define SOLVE_BONUS 1.0f  // terminal bonus added on solve (on top of the delta match-fraction reward)
 
 typedef struct {
     float perf;            // 0-1: solved or not, per episode
@@ -671,7 +670,7 @@ void c_step(Cube* env) {
 
     if (is_solved(env)) {
         env->terminals[0] = 1;
-        env->rewards[0] += SOLVE_BONUS;  // strong terminal incentive on top of the delta reward
+        env->rewards[0] = 1.0f;  // solve = max reward, capped at 1.0 (pufferlib clamps reward to [-1,1])
         env->episode_return += env->rewards[0];
         add_log(env);
         c_reset(env);
