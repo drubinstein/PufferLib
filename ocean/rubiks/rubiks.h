@@ -11,7 +11,7 @@
 
 typedef struct {
     float perf;            // 0-1: solved or not, per episode
-    float score;           // distance-from-solved heuristic
+    float score;           // mean fraction of stickers matching their face centre (1.0=solved)
     float episode_return;  // sum of rewards over episode
     float episode_length;  // steps per episode
     float n;               // REQUIRED last field (aggregation count)
@@ -45,8 +45,10 @@ typedef struct {
     unsigned char r_tmp[N*N];      // face-rotation scratch
 } Cube;
 
+int is_solved(Cube *env);  // forward decl (defined below); perf tracks solves, not reward sign
+
 void add_log(Cube* env) {
-    env->log.perf += (env->rewards[0] > 0) ? 1 : 0;
+    env->log.perf += is_solved(env) ? 1 : 0;  // solve rate (dense reward is ~always > 0)
     env->log.score += env->score;
     env->log.episode_length += env->tick;
     env->log.episode_return += env->episode_return;
@@ -228,11 +230,27 @@ int is_solved(Cube *env) {
 }
 
 void shuffle(Cube* env, int shuffles) {
+    // Each step is one random quarter-turn, so `shuffles` is the exact scramble
+    // depth (curriculum knob): shuffles=1 -> a single quarter-turn from solved.
     for (int i = 0; i < shuffles; i++) {
         int face = rand_r(&env->rng) % 6;
-        int turns = (rand_r(&env->rng) % 3) + 1;  // 1,2,3 quarter-turns
+        int turns = (rand_r(&env->rng) % 2) ? 1 : -1;  // single quarter-turn, random direction
         move(env, face, turns);
     }
+}
+
+// Dense reward: fraction of stickers whose colour matches their face's centre
+// sticker (centres never move, so face f's centre stays colour f). 1.0 == solved.
+float matching_fraction(Cube *env) {
+    int total = 6 * env->cube_n * env->cube_n;
+    int matched = 0;
+    for (int f = 0; f < 6; f++) {
+        int center = STICKER(env, f, env->cube_n / 2, env->cube_n / 2);
+        for (int r = 0; r < env->cube_n; r++)
+            for (int c = 0; c < env->cube_n; c++)
+                if (STICKER(env, f, r, c) == center) matched++;
+    }
+    return (float)matched / (float)total;
 }
 
 void compute_observations(Cube* env) {
@@ -641,12 +659,12 @@ void c_step(Cube* env) {
         move(env, face, turns);
     }
 
-    env->score = score(env);
-    env->rewards[0] -= 1.0f;
+    // Dense reward: fraction of stickers matching their face centre (1.0 == solved).
+    env->rewards[0] = matching_fraction(env);
+    env->score = env->rewards[0];
 
     if (is_solved(env)) {
         env->terminals[0] = 1;
-        env->rewards[0] = 1.0f;
         env->episode_return += env->rewards[0];
         add_log(env);
         c_reset(env);
