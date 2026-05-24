@@ -633,6 +633,8 @@ void c_step(Cube* env) {
     env->terminals[0] = 0;
     env->tick += 1;
 
+    float match_before = matching_fraction(env);  // for potential-based (delta) reward
+
     int face, turns;
     decode_action((int)env->actions[0], &face, &turns);   // CHANGE vs PR: cast float action to int
 
@@ -659,9 +661,12 @@ void c_step(Cube* env) {
         move(env, face, turns);
     }
 
-    // Dense reward: fraction of stickers matching their face centre (1.0 == solved).
-    env->rewards[0] = matching_fraction(env);
-    env->score = env->rewards[0];
+    // Potential-based (delta) reward: change in % stickers matching their face centre.
+    // Telescopes to (final - initial) match over the episode, so episode length carries
+    // no reward (prevents stalling); reaching solved (match=1.0) is optimal.
+    float match_after = matching_fraction(env);
+    env->rewards[0] = match_after - match_before;
+    env->score = match_after;
 
     if (is_solved(env)) {
         env->terminals[0] = 1;
