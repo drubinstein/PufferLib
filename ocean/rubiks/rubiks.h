@@ -8,7 +8,9 @@
 #include "rlgl.h"
 
 #define N 3   // Cube is NxNxN. Compile-time (4.0 vecenv requires compile-time OBS_SIZE). Logic is general in N.
-#define STEP_MULT 3   // per-episode max steps = max(5, STEP_MULT * scramble_depth)
+#define STEP_MULT 2   // per-episode max steps = clamp(STEP_MULT*scramble_depth, 5, EPISODE_STEP_CEIL)
+#define EPISODE_STEP_CEIL 24  // ceiling near God's number (20 in HTM) so deep episodes force short solves
+#define NUM_ACTIONS 18  // HTM action space: 0-11 quarter-turns (face x {CW,CCW}) + 12-17 double-turns (180deg/face)
 #define OBS_ONEHOT 1  // 1: one-hot colours (categorical, runs on native DefaultEncoder); 0: integer indices
 
 typedef struct {
@@ -224,8 +226,13 @@ void move(Cube *env, int face, int turns) {
 }
 
 static inline void decode_action(int action, int *face, int *turns) {
-    *face = action / 2;
-    *turns = (action % 2 == 0) ? +1 : -1;
+    if (action < 12) {                       // 0-11: quarter-turns, even=CW, odd=CCW
+        *face = action / 2;
+        *turns = (action % 2 == 0) ? +1 : -1;
+    } else {                                 // 12-17: 180deg double-turns (one per face)
+        *face = action - 12;                 // 12->U .. 17->B
+        *turns = 2;                          // direction irrelevant for 180deg; self-inverse
+    }
 }
 
 //Distance from solved based on centre sticker as the colour for that face
@@ -262,11 +269,12 @@ int is_solved(Cube *env) {
 }
 
 void shuffle(Cube* env, int shuffles) {
-    // Each step is one random quarter-turn, so `shuffles` is the exact scramble
-    // depth (curriculum knob): shuffles=1 -> a single quarter-turn from solved.
+    // HTM scramble: each step is one random move from the full 18-action HTM space
+    // (quarter CW/CCW + 180deg double per face), matching how the agent solves.
+    // `shuffles` is the scramble depth in HTM moves (curriculum knob).
     for (int i = 0; i < shuffles; i++) {
-        int face = rand_r(&env->rng) % 6;
-        int turns = (rand_r(&env->rng) % 2) ? 1 : -1;  // single quarter-turn, random direction
+        int face, turns;
+        decode_action(rand_r(&env->rng) % NUM_ACTIONS, &face, &turns);
         move(env, face, turns);
     }
 }
@@ -322,9 +330,12 @@ void c_reset(Cube* env) {
         int d = 1 + (int)(env->curriculum_max * powf(u, 1.0f / (env->depth_exponent + 1.0f)));
         if (d > env->curriculum_max) d = env->curriculum_max;            // clamp (u near 1)
         env->scramble_depth = d;
-        // Episode budget scales with difficulty (the inverse solution is `depth` quarter-turns).
+        // Episode budget scales with difficulty but is capped near God's number (20 HTM)
+        // so deep cubes can only be solved by short solutions -> speed pressure.
         int cap = STEP_MULT * d;
-        env->max_episode_steps = (cap > 5) ? cap : 5;
+        if (cap > EPISODE_STEP_CEIL) cap = EPISODE_STEP_CEIL;
+        if (cap < 5) cap = 5;
+        env->max_episode_steps = cap;
     } else {
         env->scramble_depth = 0;   // solved start (tests); keep the configured max_episode_steps
     }

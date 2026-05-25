@@ -6,7 +6,7 @@
 #define OBS_SIZE (6*N*N)
 #endif
 #define NUM_ATNS 1
-#define ACT_SIZES {12}
+#define ACT_SIZES {NUM_ACTIONS}  // 18: HTM action space (see rubiks.h)
 #define OBS_TENSOR_T ByteTensor
 
 #define Env Cube
