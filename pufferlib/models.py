@@ -63,6 +63,37 @@ class RubiksEmbed(nn.Module):
         h = self.value_embed(idx) + self.pos_embed(self.positions)  # (B, cells, embed_dim)
         return self.encoder(h.reshape(B, -1))                       # (B, hidden_size)
 
+class RubiksAttention(nn.Module):
+    '''Self-attention encoder over the 54 stickers. NO recurrence: the cube is fully
+    observable, so the optimal policy is Markovian (pair this with `--torch.network MLP`).
+    Each sticker is a token = its colour embedding + a learned positional embedding for its
+    fixed role (corner/edge/centre). A few Transformer layers do relational reasoning
+    ("do these stickers form a solved piece?"), then mean-pool to hidden_size.
+    Assumes one-hot obs (OBS_ONEHOT=1 -> obs_size = num_cells*num_colors).
+    PyTorch / `--slowly` only (no native attention kernel).'''
+    def __init__(self, obs_size, hidden_size=128, num_colors=6, num_heads=4,
+                 num_layers=2, d_model=None):
+        super().__init__()
+        self.num_colors = num_colors
+        self.num_cells = obs_size // num_colors            # 54 for N=3 (one-hot: cells*colours)
+        d_model = d_model or hidden_size
+        assert d_model % num_heads == 0, f'd_model {d_model} not divisible by num_heads {num_heads}'
+        self.value_proj = nn.Linear(num_colors, d_model)   # colour one-hot -> token embedding
+        self.pos_embed = nn.Embedding(self.num_cells, d_model)
+        self.register_buffer('positions', torch.arange(self.num_cells), persistent=False)
+        layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=num_heads, dim_feedforward=4 * d_model,
+            dropout=0.0, activation='gelu', batch_first=True, norm_first=True)
+        self.transformer = nn.TransformerEncoder(layer, num_layers=num_layers)
+        self.out = nn.Linear(d_model, hidden_size)
+
+    def forward(self, observations):
+        B = observations.shape[0]
+        x = observations.view(B, self.num_cells, self.num_colors).float()  # (B, cells, colours)
+        tok = self.value_proj(x) + self.pos_embed(self.positions)          # (B, cells, d_model)
+        h = self.transformer(tok)                                          # (B, cells, d_model)
+        return self.out(h.mean(dim=1))                                     # (B, hidden_size)
+
 class MinimalEntityEncoder(nn.Module):
     def __init__(self, obs_size, hidden_size=128):
         super().__init__()

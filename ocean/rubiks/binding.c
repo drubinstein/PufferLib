@@ -43,4 +43,5 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "solved_22_28", log->solved_22_28);
     dict_set(out, "solved_29_35", log->solved_29_35);
     dict_set(out, "max_shuffles", log->max_shuffles);
+    dict_set(out, "max_shuffles_qtm", log->max_shuffles_qtm);
 }

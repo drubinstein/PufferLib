@@ -18,12 +18,13 @@ typedef struct {
     float score;           // mean fraction of stickers matching their face centre (1.0=solved)
     float episode_return;  // sum of rewards over episode
     float episode_length;  // steps per episode
-    float shuffle_depth;   // mean scramble depth (quarter-turns) per episode
+    float shuffle_depth;   // mean scramble depth (HTM moves) per episode
     // scramble-depth distribution: fraction of episodes whose depth fell in each bucket
     float depth_1_7, depth_8_14, depth_15_21, depth_22_28, depth_29_35;
     // solved episodes per bucket; per-bucket solve rate = solved_X / depth_X
     float solved_1_7, solved_8_14, solved_15_21, solved_22_28, solved_29_35;
-    float max_shuffles;    // mean per-env adaptive curriculum frontier (current max scramble depth)
+    float max_shuffles;    // mean adaptive curriculum frontier, HTM scramble depth
+    float max_shuffles_qtm;// same frontier in QTM units (HTM x 4/3); comparable to old QTM runs
     float n;               // REQUIRED last field (aggregation count)
 } Log;
 
@@ -86,6 +87,9 @@ void add_log(Cube* env) {
     env->log.solved_22_28 += (solved && d >= 22 && d <= 28) ? 1 : 0;
     env->log.solved_29_35 += (solved && d >= 29) ? 1 : 0;
     env->log.max_shuffles += env->curriculum_max;
+    // QTM equivalent: each HTM scramble move is a quarter (1 QTM) or 180deg double (2 QTM);
+    // uniform over the 18 actions -> E[QTM/move] = (12*1 + 6*2)/18 = 4/3.
+    env->log.max_shuffles_qtm += env->curriculum_max * (4.0f / 3.0f);
     env->log.n++;
 }
 
