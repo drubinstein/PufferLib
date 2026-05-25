@@ -52,6 +52,7 @@ typedef struct {
     int advance_window;            // min frontier attempts before evaluating the gate
     float reward_shaping;          // scales per-step match-delta reward: 0=sparse(+solve), 1=dense
     int max_episode_steps;
+    int fixed_depth;               // >0: eval mode -- bypass curriculum, always scramble this deep
     int tick;
     float score;
     float episode_return;
@@ -327,9 +328,19 @@ void init(Cube* env) {
 
 void c_reset(Cube* env) {
     reset_stickers(env);
+    // Fixed-depth eval (fixed_depth>0): bypass the curriculum and always scramble exactly
+    // fixed_depth, so we can measure true solve rate at a chosen depth independent of the
+    // curriculum's advance logic (and thus of advance_threshold).
+    if (env->fixed_depth > 0) {
+        env->scramble_depth = env->fixed_depth;
+        int cap = STEP_MULT * env->fixed_depth;
+        if (cap > EPISODE_STEP_CEIL) cap = EPISODE_STEP_CEIL;
+        if (cap < 5) cap = 5;
+        env->max_episode_steps = cap;
+    }
     // Curriculum: sample scramble depth in [1, curriculum_max] with P(d) ~ d^depth_exponent
     // (0 = uniform, 1 = linear: biases practice toward the frontier). curriculum_max=0 -> solved.
-    if (env->curriculum_max > 0) {
+    else if (env->curriculum_max > 0) {
         float u = (float)rand_r(&env->rng) / ((float)RAND_MAX + 1.0f);   // [0, 1)
         int d = 1 + (int)(env->curriculum_max * powf(u, 1.0f / (env->depth_exponent + 1.0f)));
         if (d > env->curriculum_max) d = env->curriculum_max;            // clamp (u near 1)
@@ -748,7 +759,7 @@ void c_step(Cube* env) {
         // Solve-rate-gated curriculum: track outcomes at the frontier depth and raise
         // curriculum_max only once the frontier solve-rate clears advance_threshold over a
         // window. Keeps the frontier from overshooting actual competence.
-        if (env->scramble_depth == env->curriculum_max) {
+        if (env->fixed_depth == 0 && env->scramble_depth == env->curriculum_max) {
             env->frontier_attempts++;
             if (solved) env->frontier_solves++;
             if (env->frontier_attempts >= env->advance_window) {
