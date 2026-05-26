@@ -53,6 +53,10 @@ typedef struct {
     float reward_shaping;          // scales per-step match-delta reward: 0=sparse(+solve), 1=dense
     int max_episode_steps;
     int fixed_depth;               // >0: eval mode -- bypass curriculum, always scramble this deep
+    int level_mode;                // 1: episode = levels 1,2,3,... in order; fail a level -> episode ends
+    int current_level;             // level_mode: depth currently being attempted (1..shuffles)
+    int level_tick;                // level_mode: steps spent on the current level (per-level budget)
+    int deepest_cleared;           // level_mode: deepest level solved this episode (= max_shuffles)
     int tick;
     float score;
     float episode_return;
@@ -68,8 +72,10 @@ typedef struct {
 int is_solved(Cube *env);  // forward decl (defined below); perf tracks solves, not reward sign
 
 void add_log(Cube* env) {
-    int solved = is_solved(env);   // solve rate (dense reward is ~always >0, so don't use reward sign)
-    int d = env->scramble_depth;
+    // level_mode: "depth" = deepest level cleared this episode; "solved" = cleared the top level.
+    // single-scramble: depth = this episode's scramble depth; solved = cube solved at episode end.
+    int solved = env->level_mode ? (env->deepest_cleared >= env->shuffles) : is_solved(env);
+    int d = env->level_mode ? env->deepest_cleared : env->scramble_depth;
     env->log.perf += solved ? 1 : 0;
     env->log.score += env->score;
     env->log.episode_length += env->tick;
@@ -87,10 +93,12 @@ void add_log(Cube* env) {
     env->log.solved_15_21 += (solved && d >= 15 && d <= 21) ? 1 : 0;
     env->log.solved_22_28 += (solved && d >= 22 && d <= 28) ? 1 : 0;
     env->log.solved_29_35 += (solved && d >= 29) ? 1 : 0;
-    env->log.max_shuffles += env->curriculum_max;
+    // Frontier: deepest level cleared (level_mode) or the adaptive curriculum cap.
+    int frontier = env->level_mode ? env->deepest_cleared : env->curriculum_max;
+    env->log.max_shuffles += frontier;
     // QTM equivalent: each HTM scramble move is a quarter (1 QTM) or 180deg double (2 QTM);
     // uniform over the 18 actions -> E[QTM/move] = (12*1 + 6*2)/18 = 4/3.
-    env->log.max_shuffles_qtm += env->curriculum_max * (4.0f / 3.0f);
+    env->log.max_shuffles_qtm += frontier * (4.0f / 3.0f);
     env->log.n++;
 }
 
@@ -328,10 +336,18 @@ void init(Cube* env) {
 
 void c_reset(Cube* env) {
     reset_stickers(env);
+    // Level mode: an episode is levels 1,2,3,... in order. Start at level 1; c_step advances
+    // the level on each solve and ends the episode on the first failed level.
+    if (env->level_mode) {
+        env->current_level = 1;
+        env->deepest_cleared = 0;
+        env->scramble_depth = 1;
+        env->level_tick = 0;
+    }
     // Fixed-depth eval (fixed_depth>0): bypass the curriculum and always scramble exactly
     // fixed_depth, so we can measure true solve rate at a chosen depth independent of the
     // curriculum's advance logic (and thus of advance_threshold).
-    if (env->fixed_depth > 0) {
+    else if (env->fixed_depth > 0) {
         env->scramble_depth = env->fixed_depth;
         int cap = STEP_MULT * env->fixed_depth;
         if (cap > EPISODE_STEP_CEIL) cap = EPISODE_STEP_CEIL;
@@ -753,6 +769,44 @@ void c_step(Cube* env) {
     env->score = match_after;
 
     int solved = is_solved(env);
+
+    // Level mode: clear levels 1,2,3,... within one episode; the first failed level ends it.
+    if (env->level_mode) {
+        env->level_tick += 1;
+        int level_cap = STEP_MULT * env->current_level;
+        if (level_cap > EPISODE_STEP_CEIL) level_cap = EPISODE_STEP_CEIL;
+        if (level_cap < 5) level_cap = 5;
+        if (solved) {
+            env->rewards[0] = 1.0f;             // cleared the level (capped at 1 for pufferlib clamp)
+            env->episode_return += env->rewards[0];
+            env->deepest_cleared = env->current_level;
+            if (env->current_level >= env->shuffles) {   // cleared the top level -> success end
+                env->terminals[0] = 1;
+                add_log(env);
+                c_reset(env);
+                return;
+            }
+            env->current_level += 1;            // advance: re-scramble from solved, reset per-level budget
+            reset_stickers(env);
+            env->scramble_depth = env->current_level;
+            shuffle(env, env->current_level);
+            env->level_tick = 0;
+            compute_observations(env);
+            return;                             // NOT terminal -- episode continues into the next level
+        }
+        if (env->level_tick >= level_cap) {     // failed the current level -> episode ends
+            env->scramble_depth = env->current_level;
+            env->terminals[0] = 1;
+            env->episode_return += env->rewards[0];
+            add_log(env);
+            c_reset(env);
+            return;
+        }
+        env->episode_return += env->rewards[0];   // still working on this level
+        compute_observations(env);
+        return;
+    }
+
     if (solved || env->tick >= env->max_episode_steps) {
         env->terminals[0] = 1;
         if (solved) env->rewards[0] = 1.0f;  // solve = max reward, capped at 1.0 (pufferlib clamps to [-1,1])

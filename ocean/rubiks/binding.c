@@ -22,6 +22,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->reward_shaping = (float) dict_get(kwargs, "reward_shaping")->value;
     env->anim_time = (float) dict_get(kwargs, "anim_time")->value;
     env->fixed_depth = (int) dict_get(kwargs, "fixed_depth")->value;
+    env->level_mode = (int) dict_get(kwargs, "level_mode")->value;
     init(env);
 }
 
