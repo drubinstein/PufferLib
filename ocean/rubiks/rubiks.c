@@ -8,7 +8,11 @@ int main(void) {
     env.anim_time = 0.3f;
     init(&env);
 
-    unsigned char observations[6*N*N] = {0};
+#if OBS_ONEHOT
+    unsigned char observations[6*N*N*6] = {0};   // one-hot: compute_observations writes 6*N*N*6 bytes
+#else
+    unsigned char observations[6*N*N] = {0};      // integer colour indices
+#endif
     float actions[1] = {0};
     float rewards[1] = {0};
     float terminals[1] = {0};
@@ -23,7 +27,7 @@ int main(void) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {            // user mode: press 0..9/a/b not wired; auto-play otherwise
             env.user_mode = 1;
         }
-        env.actions[0] = (float)(rand_r(&env.rng) % 12);
+        env.actions[0] = (float)(rand_r(&env.rng) % NUM_ACTIONS);
         c_step(&env);
         c_render(&env);
     }

@@ -385,9 +385,10 @@ typedef struct {
 } PuffeRL;
 
 Dict* log_environments_impl(PuffeRL& pufferl) {
-    // Capacity raised from 32 to 64 to accommodate chess's per-bank
-    // hist_score_bank_<b> / hist_n_bank_<b> entries (16 keys for 8 banks).
-    Dict* out = create_dict(64);
+    // Capacity 128 to fit rubiks's per-depth histogram (depth_0..35/solved_0..35 = 72 keys)
+    // plus base env-log fields, and chess's per-bank entries. NOTE: dict_set's capacity check
+    // is an assert -> compiled out under -DNDEBUG, so an undersized dict overflows the heap silently.
+    Dict* out = create_dict(128);
     static_vec_log(pufferl.vec, out);
     return out;
 }
