@@ -60,6 +60,9 @@ typedef struct {
     int current_level;             // level_mode: depth currently being attempted (1..shuffles)
     int level_tick;                // level_mode: steps spent on the current level (per-level budget)
     int deepest_cleared;           // level_mode: deepest level solved this episode (= max_shuffles)
+    int level_retries;             // level_mode: max same-shuffle retries per level (0 = off)
+    int level_retries_left;        // retries remaining for the current level
+    unsigned int level_rng;        // rng saved before the level's scramble, to reproduce it on retry
     int tick;
     float score;
     float episode_return;
@@ -341,6 +344,7 @@ void c_reset(Cube* env) {
         env->deepest_cleared = 0;
         env->scramble_depth = 1;
         env->level_tick = 0;
+        env->level_retries_left = env->level_retries;
     }
     // Fixed-depth eval (fixed_depth>0): bypass the curriculum and always scramble exactly
     // fixed_depth, so we can measure true solve rate at a chosen depth independent of the
@@ -368,6 +372,7 @@ void c_reset(Cube* env) {
     } else {
         env->scramble_depth = 0;   // solved start (tests); keep the configured max_episode_steps
     }
+    env->level_rng = env->rng;          // save (level_mode retries reproduce this exact scramble)
     shuffle(env, env->scramble_depth);  // shuffle(.,0) is a no-op
     env->tick = 0;
     env->score = 0;
@@ -795,15 +800,26 @@ void c_step(Cube* env) {
             env->current_level += 1;            // advance: re-scramble from solved, reset per-level budget
             reset_stickers(env);
             env->scramble_depth = env->current_level;
+            env->level_rng = env->rng;          // save for same-shuffle retries of this new level
             shuffle(env, env->current_level);
             env->level_tick = 0;
+            env->level_retries_left = env->level_retries;   // fresh retries for the new level
             compute_observations(env);
             return;                             // NOT terminal -- episode continues into the next level
         }
-        if (env->level_tick >= level_cap) {     // failed the current level -> episode ends
+        if (env->level_tick >= level_cap) {     // failed this attempt at the current level
             int lc = (env->current_level < LOG_DEPTHS) ? env->current_level : LOG_DEPTHS - 1;
             env->log.depth_hist[lc] += 1;       // attempted level current_level, not cleared
-            env->scramble_depth = env->current_level;
+            if (env->level_retries_left > 0) {  // same-shuffle retry: reproduce the EXACT scramble and
+                env->level_retries_left -= 1;   // reset the per-level budget. NOT terminal, so the MinGRU
+                env->rng = env->level_rng;      // hidden state persists -> policy can try a different path.
+                reset_stickers(env);
+                shuffle(env, env->current_level);
+                env->level_tick = 0;
+                compute_observations(env);
+                return;
+            }
+            env->scramble_depth = env->current_level;   // out of retries -> episode ends
             env->terminals[0] = 1;
             env->episode_return += env->rewards[0];
             add_log(env);

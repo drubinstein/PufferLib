@@ -24,6 +24,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->fixed_depth = (int) dict_get(kwargs, "fixed_depth")->value;
     env->level_mode = (int) dict_get(kwargs, "level_mode")->value;
     env->level_linear = (int) dict_get(kwargs, "level_linear")->value;
+    env->level_retries = (int) dict_get(kwargs, "level_retries")->value;
     init(env);
 }
 
