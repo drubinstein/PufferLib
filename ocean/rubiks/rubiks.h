@@ -84,10 +84,13 @@ void add_log(Cube* env) {
     env->log.episode_length += env->tick;
     env->log.episode_return += env->episode_return;
     env->log.shuffle_depth += d;
-    // per-depth histogram (d clamped into [0, LOG_DEPTHS-1])
-    int di = (d < 0) ? 0 : (d >= LOG_DEPTHS ? LOG_DEPTHS - 1 : d);
-    env->log.depth_hist[di] += 1;
-    if (solved) env->log.solved_hist[di] += 1;
+    // Per-depth histogram. Single-scramble mode: count this episode's depth here. Level mode
+    // counts per level (attempted/cleared) in c_step, so skip here to avoid double-counting.
+    if (!env->level_mode) {
+        int di = (d < 0) ? 0 : (d >= LOG_DEPTHS ? LOG_DEPTHS - 1 : d);
+        env->log.depth_hist[di] += 1;
+        if (solved) env->log.solved_hist[di] += 1;
+    }
     // Frontier: deepest level cleared (level_mode) or the adaptive curriculum cap.
     int frontier = env->level_mode ? env->deepest_cleared : env->curriculum_max;
     env->log.max_shuffles += frontier;
@@ -772,6 +775,10 @@ void c_step(Cube* env) {
         if (level_cap > EPISODE_STEP_CEIL) level_cap = EPISODE_STEP_CEIL;
         if (level_cap < 5) level_cap = 5;
         if (solved) {
+            // record level current_level as attempted AND cleared -> per-level clear rate = solved_k/depth_k
+            int lc = (env->current_level < LOG_DEPTHS) ? env->current_level : LOG_DEPTHS - 1;
+            env->log.depth_hist[lc] += 1;
+            env->log.solved_hist[lc] += 1;
             // cleared the level: flat +1, or (level_linear) k/shuffles so deeper levels are worth
             // more. Both stay <=1 for pufferlib's [-1,1] clamp (top level -> exactly 1.0).
             env->rewards[0] = env->level_linear
@@ -794,6 +801,8 @@ void c_step(Cube* env) {
             return;                             // NOT terminal -- episode continues into the next level
         }
         if (env->level_tick >= level_cap) {     // failed the current level -> episode ends
+            int lc = (env->current_level < LOG_DEPTHS) ? env->current_level : LOG_DEPTHS - 1;
+            env->log.depth_hist[lc] += 1;       // attempted level current_level, not cleared
             env->scramble_depth = env->current_level;
             env->terminals[0] = 1;
             env->episode_return += env->rewards[0];
