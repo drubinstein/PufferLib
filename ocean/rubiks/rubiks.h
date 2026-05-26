@@ -11,6 +11,7 @@
 #define STEP_MULT 2   // per-episode max steps = clamp(STEP_MULT*scramble_depth, 5, EPISODE_STEP_CEIL)
 #define EPISODE_STEP_CEIL 24  // ceiling near God's number (20 in HTM) so deep episodes force short solves
 #define NUM_ACTIONS 18  // HTM action space: 0-11 quarter-turns (face x {CW,CCW}) + 12-17 double-turns (180deg/face)
+#define LOG_DEPTHS 36   // per-depth log histogram covers depths 0..35 (logged as depth_0..depth_35)
 #define OBS_ONEHOT 1  // 1: one-hot colours (categorical, runs on native DefaultEncoder); 0: integer indices
 
 typedef struct {
@@ -19,11 +20,12 @@ typedef struct {
     float episode_return;  // sum of rewards over episode
     float episode_length;  // steps per episode
     float shuffle_depth;   // mean scramble depth (HTM moves) per episode
-    // scramble-depth distribution: fraction of episodes whose depth fell in each bucket
-    float depth_1_7, depth_8_14, depth_15_21, depth_22_28, depth_29_35;
-    // solved episodes per bucket; per-bucket solve rate = solved_X / depth_X
-    float solved_1_7, solved_8_14, solved_15_21, solved_22_28, solved_29_35;
-    float max_shuffles;    // mean adaptive curriculum frontier, HTM scramble depth
+    // Per-depth histogram (logged as depth_0..depth_35 / solved_0..solved_35):
+    // depth_hist[d] = fraction of episodes at depth d; solved_hist[d] = fraction solved at d.
+    // Per-depth solve rate = solved_hist[d] / depth_hist[d]. In level_mode, d = deepest level cleared.
+    float depth_hist[LOG_DEPTHS];
+    float solved_hist[LOG_DEPTHS];
+    float max_shuffles;    // mean adaptive curriculum frontier / deepest level cleared (HTM)
     float max_shuffles_qtm;// same frontier in QTM units (HTM x 4/3); comparable to old QTM runs
     float n;               // REQUIRED last field (aggregation count)
 } Log;
@@ -54,6 +56,7 @@ typedef struct {
     int max_episode_steps;
     int fixed_depth;               // >0: eval mode -- bypass curriculum, always scramble this deep
     int level_mode;                // 1: episode = levels 1,2,3,... in order; fail a level -> episode ends
+    int level_linear;              // level_mode: 1 -> clearing level k rewards k/shuffles (deeper=more); 0 -> flat +1
     int current_level;             // level_mode: depth currently being attempted (1..shuffles)
     int level_tick;                // level_mode: steps spent on the current level (per-level budget)
     int deepest_cleared;           // level_mode: deepest level solved this episode (= max_shuffles)
@@ -81,18 +84,10 @@ void add_log(Cube* env) {
     env->log.episode_length += env->tick;
     env->log.episode_return += env->episode_return;
     env->log.shuffle_depth += d;
-    // scramble-depth distribution (fraction of episodes per bucket after aggregation)
-    env->log.depth_1_7   += (d >= 1  && d <= 7 ) ? 1 : 0;
-    env->log.depth_8_14  += (d >= 8  && d <= 14) ? 1 : 0;
-    env->log.depth_15_21 += (d >= 15 && d <= 21) ? 1 : 0;
-    env->log.depth_22_28 += (d >= 22 && d <= 28) ? 1 : 0;
-    env->log.depth_29_35 += (d >= 29) ? 1 : 0;
-    // solved episodes per bucket (per-bucket solve rate = solved_X / depth_X)
-    env->log.solved_1_7   += (solved && d >= 1  && d <= 7 ) ? 1 : 0;
-    env->log.solved_8_14  += (solved && d >= 8  && d <= 14) ? 1 : 0;
-    env->log.solved_15_21 += (solved && d >= 15 && d <= 21) ? 1 : 0;
-    env->log.solved_22_28 += (solved && d >= 22 && d <= 28) ? 1 : 0;
-    env->log.solved_29_35 += (solved && d >= 29) ? 1 : 0;
+    // per-depth histogram (d clamped into [0, LOG_DEPTHS-1])
+    int di = (d < 0) ? 0 : (d >= LOG_DEPTHS ? LOG_DEPTHS - 1 : d);
+    env->log.depth_hist[di] += 1;
+    if (solved) env->log.solved_hist[di] += 1;
     // Frontier: deepest level cleared (level_mode) or the adaptive curriculum cap.
     int frontier = env->level_mode ? env->deepest_cleared : env->curriculum_max;
     env->log.max_shuffles += frontier;
@@ -777,7 +772,11 @@ void c_step(Cube* env) {
         if (level_cap > EPISODE_STEP_CEIL) level_cap = EPISODE_STEP_CEIL;
         if (level_cap < 5) level_cap = 5;
         if (solved) {
-            env->rewards[0] = 1.0f;             // cleared the level (capped at 1 for pufferlib clamp)
+            // cleared the level: flat +1, or (level_linear) k/shuffles so deeper levels are worth
+            // more. Both stay <=1 for pufferlib's [-1,1] clamp (top level -> exactly 1.0).
+            env->rewards[0] = env->level_linear
+                ? (float)env->current_level / (float)env->shuffles
+                : 1.0f;
             env->episode_return += env->rewards[0];
             env->deepest_cleared = env->current_level;
             if (env->current_level >= env->shuffles) {   // cleared the top level -> success end

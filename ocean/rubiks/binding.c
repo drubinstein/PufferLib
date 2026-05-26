@@ -23,6 +23,7 @@ void my_init(Env* env, Dict* kwargs) {
     env->anim_time = (float) dict_get(kwargs, "anim_time")->value;
     env->fixed_depth = (int) dict_get(kwargs, "fixed_depth")->value;
     env->level_mode = (int) dict_get(kwargs, "level_mode")->value;
+    env->level_linear = (int) dict_get(kwargs, "level_linear")->value;
     init(env);
 }
 
@@ -32,18 +33,22 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "episode_return", log->episode_return);
     dict_set(out, "episode_length", log->episode_length);
     dict_set(out, "shuffle_depth", log->shuffle_depth);
-    // scramble-depth distribution (fraction of episodes per bucket)
-    dict_set(out, "depth_1_7", log->depth_1_7);
-    dict_set(out, "depth_8_14", log->depth_8_14);
-    dict_set(out, "depth_15_21", log->depth_15_21);
-    dict_set(out, "depth_22_28", log->depth_22_28);
-    dict_set(out, "depth_29_35", log->depth_29_35);
-    // solved episodes per bucket (per-bucket solve rate = solved_X / depth_X)
-    dict_set(out, "solved_1_7", log->solved_1_7);
-    dict_set(out, "solved_8_14", log->solved_8_14);
-    dict_set(out, "solved_15_21", log->solved_15_21);
-    dict_set(out, "solved_22_28", log->solved_22_28);
-    dict_set(out, "solved_29_35", log->solved_29_35);
+    // Per-depth histogram: depth_0..depth_35 / solved_0..solved_35. dict_set stores the key
+    // POINTER (no copy), so the key strings must persist -> build static buffers once.
+    static char depth_keys[LOG_DEPTHS][12];
+    static char solved_keys[LOG_DEPTHS][12];
+    static int keys_init = 0;
+    if (!keys_init) {
+        for (int d = 0; d < LOG_DEPTHS; d++) {
+            snprintf(depth_keys[d], sizeof(depth_keys[d]), "depth_%d", d);
+            snprintf(solved_keys[d], sizeof(solved_keys[d]), "solved_%d", d);
+        }
+        keys_init = 1;
+    }
+    for (int d = 0; d < LOG_DEPTHS; d++) {
+        dict_set(out, depth_keys[d], log->depth_hist[d]);
+        dict_set(out, solved_keys[d], log->solved_hist[d]);
+    }
     dict_set(out, "max_shuffles", log->max_shuffles);
     dict_set(out, "max_shuffles_qtm", log->max_shuffles_qtm);
 }
