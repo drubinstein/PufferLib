@@ -63,6 +63,32 @@ class RubiksEmbed(nn.Module):
         h = self.value_embed(idx) + self.pos_embed(self.positions)  # (B, cells, embed_dim)
         return self.encoder(h.reshape(B, -1))                       # (B, hidden_size)
 
+class RubiksFaceletEmbed(nn.Module):
+    '''Per-facelet embedding: each of the 54 physical stickers is its own token (vocab = 6*N*N),
+    tracked through moves by the env (obs = facelet IDs; build with OBS_ONEHOT=0). A facelet's id
+    is its home position, so id//(N*N) is its colour. Summed with a learned positional embedding
+    over the cells -> MLP, so a token encodes "facelet F (home F) is now at position p". PyTorch /
+    --slowly only; requires OBS_ONEHOT=0 (obs is 6*N*N integer ids, not the colour one-hot).'''
+    def __init__(self, obs_size, hidden_size=128, embed_dim=None):
+        super().__init__()
+        self.num_cells = obs_size                          # OBS_ONEHOT=0 -> 6*N*N integer ids (54)
+        vocab = obs_size                                   # 54 facelet IDs
+        if embed_dim is None:
+            embed_dim = int(np.ceil(vocab ** 0.25))        # remix heuristic -> 3 for vocab 54
+        self.facelet_embed = nn.Embedding(vocab, embed_dim)
+        self.pos_embed = nn.Embedding(self.num_cells, embed_dim)
+        self.register_buffer('positions', torch.arange(self.num_cells), persistent=False)
+        self.encoder = nn.Sequential(
+            nn.Linear(self.num_cells * embed_dim, hidden_size), nn.GELU(),
+            nn.Linear(hidden_size, hidden_size), nn.GELU(),
+        )
+
+    def forward(self, observations):
+        B = observations.shape[0]
+        ids = observations.reshape(B, self.num_cells).long()             # (B, cells) facelet ids 0..53
+        h = self.facelet_embed(ids) + self.pos_embed(self.positions)     # (B, cells, embed_dim)
+        return self.encoder(h.reshape(B, -1))                            # (B, hidden_size)
+
 class RubiksAttention(nn.Module):
     '''Self-attention encoder over the 54 stickers. NO recurrence: the cube is fully
     observable, so the optimal policy is Markovian (pair this with `--torch.network MLP`).

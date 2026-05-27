@@ -70,7 +70,7 @@ typedef struct {
     int render;                    // render only (0 in training)
     int user_mode, highlight_layer, highlight_axis;  // render only
     strip_t strips[6][4];          // precomputed adjacency strips
-    unsigned char stickers[6*N*N]; // the cube state (color indices)
+    unsigned char stickers[6*N*N]; // facelet IDs 0..6*N*N-1 (colour = id/(N*N)); permuted by moves
     unsigned char tmp[N];          // rotation scratch
     unsigned char r_tmp[N*N];      // face-rotation scratch
 } Cube;
@@ -104,6 +104,8 @@ void add_log(Cube* env) {
 }
 
 #define STICKER(env,f,r,c) ((env)->stickers[(f)*(env)->cube_n*(env)->cube_n + (r)*(env)->cube_n + (c)])
+// stickers[] now holds FACELET IDs (0..6*N*N-1); a facelet's colour is its home face = id/(N*N).
+#define COLOR(env,f,r,c) (STICKER(env,f,r,c) / ((env)->cube_n*(env)->cube_n))
 #define R_TMP(i,j) (env)->r_tmp[(i)*(env)->cube_n + (j)]
 
 // Precompute strips that surround each face
@@ -150,11 +152,13 @@ void precompute_strips(Cube *env) {
 }
 
 void reset_stickers(Cube* env) {
+    // Each facelet starts at its home position: facelet id = the cell's linear index.
+    // Colour = id/(N*N) = home face, so a solved cube still shows face f as colour f.
+    int nn = env->cube_n * env->cube_n;
     for(int i = 0; i < 6; i++) {
-        int col = i;
             for(int j = 0; j < env->cube_n; j++) {
                for(int k = 0; k < env->cube_n; k++) {
-                   STICKER(env, i,j,k) = col;
+                   STICKER(env, i,j,k) = i*nn + j*env->cube_n + k;
                }
             }
     }
@@ -258,7 +262,7 @@ float score(Cube *env) {
         int face_score = 0;
         for (int r = 0; r < env->cube_n; r++) {
             for (int c = 0; c < env->cube_n; c++) {
-                if (STICKER(env, f, r, c) == t_colour)
+                if (COLOR(env, f, r, c) == t_colour)
                     face_score++;
             }
         }
@@ -273,7 +277,7 @@ int is_solved(Cube *env) {
         int color = f;
         for (int r = 0; r < env->cube_n; r++) {
             for (int c = 0; c < env->cube_n; c++) {
-                if (STICKER(env, f, r, c) != color) {
+                if (COLOR(env, f, r, c) != color) {
                     return 0;
                 }
             }
@@ -299,10 +303,10 @@ float matching_fraction(Cube *env) {
     int total = 6 * env->cube_n * env->cube_n;
     int matched = 0;
     for (int f = 0; f < 6; f++) {
-        int center = STICKER(env, f, env->cube_n / 2, env->cube_n / 2);
+        int center = COLOR(env, f, env->cube_n / 2, env->cube_n / 2);  // centre facelet's colour (= f)
         for (int r = 0; r < env->cube_n; r++)
             for (int c = 0; c < env->cube_n; c++)
-                if (STICKER(env, f, r, c) == center) matched++;
+                if (COLOR(env, f, r, c) == center) matched++;
     }
     return (float)matched / (float)total;
 }
@@ -313,11 +317,12 @@ void compute_observations(Cube* env) {
     // Categorical one-hot per sticker: obs[cell*6 + colour] = 1. Equivalent to a value
     // embedding once the (existing) Linear encoder runs over it — so it gets the
     // categorical representation on the native backend with no custom kernel.
+    int nn = env->cube_n * env->cube_n;
     memset(env->observations, 0, cells * 6);
     for (int i = 0; i < cells; i++)
-        env->observations[i * 6 + env->stickers[i]] = 1;
+        env->observations[i * 6 + env->stickers[i] / nn] = 1;   // colour = facelet id / (N*N)
 #else
-    memcpy(env->observations, env->stickers, cells);   // integer colour indices (for RubiksEmbed)
+    memcpy(env->observations, env->stickers, cells);   // facelet IDs 0..6*N*N-1 (for RubiksFaceletEmbed)
 #endif
 }
 
@@ -607,22 +612,22 @@ void c_render(Cube* env) {
                 Color faces[6] = { BLACK, BLACK, BLACK, BLACK, BLACK, BLACK };
                 // Right (+X)
                 if (x == env->cube_n - 1)
-                    faces[0] = sticker_colors[ STICKER(env, R, env->cube_n - 1 - y, env->cube_n - 1 - z) ];
+                    faces[0] = sticker_colors[ COLOR(env, R, env->cube_n - 1 - y, env->cube_n - 1 - z) ];
                 // Left (−X)
                 if (x == 0)
-                    faces[1] = sticker_colors[ STICKER(env, L, env->cube_n - 1 - y, z) ];
+                    faces[1] = sticker_colors[ COLOR(env, L, env->cube_n - 1 - y, z) ];
                 // Up (+Y)
                 if (y == env->cube_n - 1)
-                    faces[2] = sticker_colors[ STICKER(env, U, z, x) ];
+                    faces[2] = sticker_colors[ COLOR(env, U, z, x) ];
                 // Down (−Y)
                 if (y == 0)
-                    faces[3] = sticker_colors[ STICKER(env, D, env->cube_n-1-z, x) ];
+                    faces[3] = sticker_colors[ COLOR(env, D, env->cube_n-1-z, x) ];
                 // Front (+Z)
                 if (z == env->cube_n - 1)
-                    faces[4] = sticker_colors[ STICKER(env, F, env->cube_n - 1 - y, x) ];
+                    faces[4] = sticker_colors[ COLOR(env, F, env->cube_n - 1 - y, x) ];
                 // Back (−Z)
                 if (z == 0)
-                    faces[5] = sticker_colors[ STICKER(env, B, env->cube_n - 1 - y, env->cube_n - 1 - x) ];
+                    faces[5] = sticker_colors[ COLOR(env, B, env->cube_n - 1 - y, env->cube_n - 1 - x) ];
                 rlPushMatrix();
                 // rotate only the turning layer while animating
                 if (anim.rotating && in_layer(pos, anim.axis, anim.layer, env->cube_n)) {
